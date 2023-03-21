@@ -14,9 +14,9 @@ import scikit_posthocs as sp
 
 class Ext:
 
-	def __init__(self,identified=True):
+	def __init__(self,identified=True,data_folder=None):
 
-		self.data_folder = 'C:/Users/maria/OneDrive/Documents/Politecnico/Datos_Meteo_Satel/CORAEFES/Articulo/'
+		self.data_folder = 'C:/Users/maria/OneDrive/Documents/Politecnico/Datos_Meteo_Satel/CORAEFES/Articulo/' if data_folder==None else data_folder
 		self.lockdown_dates = ['2020-03-20','2020-07-01']
 		self.Events = pd.read_csv(self.data_folder+'Datos/EventsExtIdentification_2019-2022_AOD-SO2.csv',index_col=0,parse_dates=True) 
 
