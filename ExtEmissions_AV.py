@@ -19,6 +19,7 @@ class Ext:
 		self.data_folder = 'C:/Users/maria/OneDrive/Documents/Politecnico/Datos_Meteo_Satel/CORAEFES/Articulo/' if data_folder==None else data_folder
 		self.lockdown_dates = ['2020-03-20','2020-07-01']
 		self.Events = pd.read_csv(self.data_folder+'Datos/EventsExtIdentification_2019-2022_AOD-SO2.csv',index_col=0,parse_dates=True) 
+		self.nn = [-11,-1,9,26]
 
 	def Read_Chemi(self,*args,**kwargs):
 		## función de lectura de la caracterización química del PM2.5, se tiene en cuenta levoglucosan, metal, iones, cationes
@@ -66,7 +67,7 @@ class Ext:
 			Chem['carbon'] = Carbonc.dropna(axis=0,how='all').dropna(axis=1,how='all')
 
 		for var in variables:
-			Chem[var]=Chem[var][np.logical_not(np.abs((Chem[var]-Chem[var].mean())/Chem[var].astype(float).std())>5)]
+			Chem[var]=Chem[var][np.logical_not(np.abs((Chem[var]-Chem[var].mean())/Chem[var].astype(float).std())>3)]
 	
 		## se concatena en un DataFrame el diccionario de los diferentes compuestos químicos.
 		self.Chem    = pd.concat(Chem,axis=1)
@@ -79,7 +80,7 @@ class Ext:
 		filtro = kwargs.get('filtro',True)
 		bincompara = kwargs.get('bincompara',1)
 
-		nn=[-10,0,9,20,30]
+		nn= self.nn.copy()
 		self.df_PostHoc={}
 		for var in variables:
 			Data=self.Chem[var].copy()
@@ -91,19 +92,19 @@ class Ext:
 			for i in range(len(nn)-1):
 				Data.loc[lambda df:(df['dias']>=nn[i])&(df['dias']<nn[i+1]),'Cat']=int(i+1)
 			Data=Data.dropna(axis=0)
-			self.df_PostHoc[var]=pd.DataFrame(columns=self.Chem[var].columns,index=np.arange(1,5))
+			self.df_PostHoc[var]=pd.DataFrame(columns=self.Chem[var].columns,index=np.arange(1,len(nn)))
 			for com in Data.columns[:-2]:
 				Compara=sp.posthoc_ttest(Data, val_col=com, group_col='Cat', p_adjust='holm').sort_index().round(4)
 				self.df_PostHoc[var][com] = Compara.iloc[bincompara,:].sort_index().values
 
 
-	def plot_SinceEvent(self,*args,**kwargs):
+	def Plot_SinceEvent(self,*args,**kwargs):
 		event = kwargs.get('event','omaod')
 		var = kwargs.get('variables','cation')
 		filtro = kwargs.get('filtro',True)
 		com = kwargs.get('compuesto','Potasio')
 
-		nn=[-10,0,9,20,30]
+		nn=self.nn.copy()
 		Data=self.Chem[var].copy()
 		Data['dias']=self.Events['dias_%s'%event][self.Events.index.floor('D').isin(Data.index)]
 
@@ -143,27 +144,100 @@ class Ext:
 		ax.set_xlabel('days since a %s event'%event, color = 'k',fontsize=12) 
 		self.magnitude = magnitude
 
-	def pcolor_SinceEvent(self,*args,**kwargs):
+	def ConcStd_SinceEvent(self,*args,**kwargs):
 		event = kwargs.get('event','omaod')
 		variables = kwargs.get('variables',['metal','ion','cation','carbon'])
 		filtro = kwargs.get('filtro',True)
-		
+		confianza = kwargs.get('confianza',90)
+
 		ConcEvent = {}
-		nn=[-10,0,9,20,30]
+		ConcEventQ25 = {}
+		ConcEventQ75 = {}
+
+		nn=self.nn.copy()
 
 		for var in variables:
 
 			Temporal=self.df_PostHoc[var].T
-			compuestos=Temporal[Temporal<=0.1].dropna(axis=0,how='all').index
+			compuestos=Temporal[Temporal<=1.-(confianza/100.)].dropna(axis=0,how='all').index
 			Data=self.Chem[var][compuestos].copy()
 			for column in Data.columns:
-				Data[column] = (Data[column] - Data[column].min()) / (Data[column].max() - Data[column].min())   
+				Data[column] = (Data[column] - Data[column].mean()) / Data[column].std()   
+				#Data[column] = (Data[column] - Data[column].min()) / (Data[column].max() - Data[column].min())   
 
 			Data['dias']=self.Events['dias_%s'%event][self.Events.index.floor('D').isin(Data.index)]		
 			ConcEvent[var]= pd.DataFrame(columns=nn[:-1],index=compuestos)
+			ConcEventQ25[var]= pd.DataFrame(columns=nn[:-1],index=compuestos)
+			ConcEventQ75[var]= pd.DataFrame(columns=nn[:-1],index=compuestos)
 
 			for com in compuestos:
 				for i in range(len(nn)-1):
- 					ConcEvent[var].loc[com,nn[i]]=np.mean(Data[com][(Data['dias']>=nn[i])&(Data['dias']<nn[i+1])])
+ 					ConcEvent[var].loc[com,nn[i]]=np.quantile(Data[com][(Data[com]>=-40)&(Data['dias']>=nn[i])&(Data['dias']<nn[i+1])],0.5)
+ 					ConcEventQ25[var].loc[com,nn[i]]=np.quantile(Data[com][(Data[com]>=-40)&(Data['dias']>=nn[i])&(Data['dias']<nn[i+1])],0.25)
+ 					ConcEventQ75[var].loc[com,nn[i]]=np.quantile(Data[com][(Data[com]>=-40)&(Data['dias']>=nn[i])&(Data['dias']<nn[i+1])],0.75)
 			ConcEvent[var]=ConcEvent[var].astype(float)
-		self.ConcEvent = ConcEvent
+			ConcEventQ25[var]=ConcEventQ25[var].astype(float)
+			ConcEventQ75[var]=ConcEventQ75[var].astype(float)
+		self.ConcEventMean = ConcEvent
+		self.ConcEventQ25 = ConcEventQ25
+		self.ConcEventQ75 = ConcEventQ75
+
+
+	def Whisker_Plot(self,*args,**kwargs):
+		event = kwargs.get('event','omaod')
+		filtro = kwargs.get('filtro',True)
+		confianza = kwargs.get('confianza',90)
+
+		self.PostHoc_test(event=event,filtro=filtro)
+		self.ConcStd_SinceEvent(event=event,filtro=filtro,confianza=confianza)
+
+
+		plt.close()
+
+		fig, ax= plt.subplots(figsize=(5, 10))
+		ax.tick_params(axis ='both',labelsize=14)
+		plt.xlabel('Standarized concentration [std.]',fontsize=14)
+
+		datos=pd.concat(self.ConcEventMean)
+		datos25=pd.concat(self.ConcEventQ25)
+		datos75=pd.concat(self.ConcEventQ75)
+
+		Y=np.arange(0,len(pd.concat(self.ConcEventMean))*3,3)
+
+		plt.scatter(datos[-1],Y,color='k')
+		plt.hlines(Y,datos25[-1],datos75[-1],color='k')
+		plt.vlines(datos25[-1],Y-0.25,Y+0.25,color='k')
+		plt.vlines(datos75[-1],Y-0.25,Y+0.25,color='k')
+
+		plt.scatter(datos[-11],Y+0.5,color='r')
+		plt.hlines(Y+0.5,datos25[-11],datos75[-11],color='r')
+		plt.vlines(datos25[-11],Y+0.25,Y+0.75,color='r')
+		plt.vlines(datos75[-11],Y+0.25,Y+0.75,color='r')
+
+		plt.scatter(datos[9],Y-0.5,color='blue')
+		plt.hlines(Y-0.5,datos25[9],datos75[9],color='blue')
+		plt.vlines(datos25[9],Y-0.75,Y-0.25,color='blue')
+		plt.vlines(datos75[9],Y-0.75,Y-0.25,color='blue')
+
+		plt.vlines(0,-3,Y[-1]+3,linestyle='--',color='grey')
+		#plt.invert_yaxis()  # labels read top-to-bottom
+
+		indexlev1 =datos.index.get_level_values(1)
+		indexlev0 =datos.index.get_level_values(0)
+		plt.yticks(Y,indexlev1)
+
+		for i in range(len(Y)):
+		    value = self.df_PostHoc[indexlev0[i]][indexlev1[i]][1]
+		    if (value<=0.1) and (value>0.05):
+		        plt.text(datos75[-11][i]+0.05,Y[i]+0.45,'+',color='r')
+		    if value<=0.05:
+		        plt.text(datos75[-11][i]+0.05,Y[i]+0.45,'*',color='r')
+		    value = self.df_PostHoc[indexlev0[i]][indexlev1[i]][3]
+		    if (value<=0.1) and (value>0.05):
+		        plt.text(datos75[9][i]+0.05,Y[i]-0.55,'+',color='blue')
+		    if value<=0.05:
+		        plt.text(datos75[9][i]+0.05,Y[i]-0.60,'*',color='blue',fontsize=14)
+
+		plt.grid(alpha=0.5)
+		plt.xlim(-2,2)
+		plt.ylim(-3,Y[-1]+3)
