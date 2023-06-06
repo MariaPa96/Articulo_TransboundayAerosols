@@ -1,1 +1,1 @@
-Scripts supporting the investigation to reduce BC emission from forest fires in Colombia.
+This repository contains key supporting scripts using to the article title "Identification of natural transboundary sources of air pollution in the Aburrá Valley using reanalysis  data and chemical characterization of PM2.5". In the folder trayectories 
